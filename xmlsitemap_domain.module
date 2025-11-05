@@ -282,38 +282,32 @@ function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
   $base_table = reset($tables);
   $base_alias = $base_table['alias'];
 
-  \Drupal::logger('xmlsitemap_domain')->notice('Base table alias: @alias', [
-    '@alias' => $base_alias,
-  ]);
-
   // Join with node field data to filter by domain.
   $query->leftJoin('node__field_domain_access', 'nfd', "$base_alias.type = 'node' AND $base_alias.id = nfd.entity_id");
 
   // Also check for "all affiliates" field.
   $query->leftJoin('node__field_domain_all_affiliates', 'nfda', "$base_alias.type = 'node' AND $base_alias.id = nfda.entity_id");
 
-  // Build condition: for nodes, must have domain match OR all affiliates
-  // For non-nodes, include everything
+  // Build condition for nodes:
+  // Include if: (domain matches) OR (all affiliates) OR (no domain field set - NULL)
   $node_condition = $query->andConditionGroup();
   $node_condition->condition("$base_alias.type", 'node');
 
   $domain_or = $query->orConditionGroup();
   $domain_or->condition('nfd.field_domain_access_target_id', $domain_id);
   $domain_or->condition('nfda.field_domain_all_affiliates_value', 1);
+  $domain_or->isNull('nfd.field_domain_access_target_id');  // Include nodes without domain field
 
   $node_condition->condition($domain_or);
 
+  // Final condition: nodes matching above OR non-nodes
   $final_or = $query->orConditionGroup();
   $final_or->condition($node_condition);
   $final_or->condition("$base_alias.type", 'node', '<>');
 
   $query->condition($final_or);
 
-  // Debug: Log the query
-  \Drupal::logger('xmlsitemap_domain')->notice('Query altered for domain filtering');
-  \Drupal::logger('xmlsitemap_domain')->notice('SQL: @sql', [
-    '@sql' => (string) $query,
-  ]);
+  \Drupal::logger('xmlsitemap_domain')->notice('Query altered - nodes without domain field will be included');
 }
 
 /**
