@@ -1,0 +1,57 @@
+<?php
+
+/**
+ * @file
+ * Installation file for XML Sitemap Domain module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function xmlsitemap_domain_schema() {
+  $schema['xmlsitemap_domain'] = [
+    'description' => 'Stores domain associations for XML sitemap custom links.',
+    'fields' => [
+      'link_id' => [
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'The XML sitemap custom link ID.',
+      ],
+      'domain_id' => [
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'The domain ID.',
+      ],
+    ],
+    'primary key' => ['link_id'],
+    'indexes' => [
+      'domain_id' => ['domain_id'],
+    ],
+  ];
+
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function xmlsitemap_domain_install() {
+  // Set default configuration.
+  \Drupal::configFactory()->getEditable('xmlsitemap_domain.settings')
+    ->set('auto_regenerate', TRUE)
+    ->save();
+
+  \Drupal::messenger()->addStatus(t('XML Sitemap Domain module has been installed successfully.'));
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function xmlsitemap_domain_uninstall() {
+  // Clean up configuration.
+  \Drupal::configFactory()->getEditable('xmlsitemap_domain.settings')->delete();
+
+  \Drupal::messenger()->addStatus(t('XML Sitemap Domain module has been uninstalled successfully.'));
+}

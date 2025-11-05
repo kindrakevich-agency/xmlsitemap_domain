@@ -1,0 +1,234 @@
+<?php
+
+/**
+ * @file
+ * XML Sitemap Domain module file.
+ *
+ * Integrates XML Sitemap with Domain Access to provide per-domain sitemaps.
+ */
+
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Entity\EntityInterface;
+
+/**
+ * Implements hook_form_FORM_ID_alter() for xmlsitemap_custom_add_form.
+ *
+ * Adds domain selection field to custom sitemap link forms.
+ */
+function xmlsitemap_domain_form_xmlsitemap_custom_add_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  _xmlsitemap_domain_add_domain_field($form, $form_state);
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter() for xmlsitemap_custom_edit_form.
+ *
+ * Adds domain selection field to custom sitemap link edit forms.
+ */
+function xmlsitemap_domain_form_xmlsitemap_custom_edit_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  _xmlsitemap_domain_add_domain_field($form, $form_state);
+}
+
+/**
+ * Helper function to add domain selection field to forms.
+ */
+function _xmlsitemap_domain_add_domain_field(&$form, FormStateInterface $form_state) {
+  // Check if domain module is available.
+  if (!\Drupal::moduleHandler()->moduleExists('domain')) {
+    return;
+  }
+
+  $domain_storage = \Drupal::entityTypeManager()->getStorage('domain');
+  $domains = $domain_storage->loadMultiple();
+
+  $options = [];
+  foreach ($domains as $domain) {
+    $options[$domain->id()] = $domain->label();
+  }
+
+  // Get the current entity if editing.
+  $entity = $form_state->getFormObject()->getEntity();
+  $default_value = NULL;
+
+  if (!$entity->isNew() && isset($entity->domain_id)) {
+    $default_value = $entity->domain_id;
+  }
+
+  $form['domain_id'] = [
+    '#type' => 'select',
+    '#title' => t('Domain'),
+    '#description' => t('Select the domain for this sitemap link. Leave empty for all domains.'),
+    '#options' => ['' => t('- All domains -')] + $options,
+    '#default_value' => $default_value,
+    '#weight' => -5,
+  ];
+
+  // Add custom submit handler.
+  $form['actions']['submit']['#submit'][] = 'xmlsitemap_domain_custom_link_submit';
+}
+
+/**
+ * Custom submit handler to save domain information with custom links.
+ */
+function xmlsitemap_domain_custom_link_submit($form, FormStateInterface $form_state) {
+  $domain_id = $form_state->getValue('domain_id');
+  $entity = $form_state->getFormObject()->getEntity();
+
+  if ($domain_id) {
+    // Store domain association.
+    \Drupal::database()->merge('xmlsitemap_domain')
+      ->key(['link_id' => $entity->id()])
+      ->fields([
+        'domain_id' => $domain_id,
+      ])
+      ->execute();
+  }
+  else {
+    // Remove domain association if "All domains" selected.
+    \Drupal::database()->delete('xmlsitemap_domain')
+      ->condition('link_id', $entity->id())
+      ->execute();
+  }
+}
+
+/**
+ * Implements hook_entity_insert().
+ *
+ * Regenerates sitemap when new content is added.
+ */
+function xmlsitemap_domain_entity_insert(EntityInterface $entity) {
+  _xmlsitemap_domain_regenerate_on_entity_change($entity);
+}
+
+/**
+ * Implements hook_entity_update().
+ *
+ * Regenerates sitemap when content is updated.
+ */
+function xmlsitemap_domain_entity_update(EntityInterface $entity) {
+  _xmlsitemap_domain_regenerate_on_entity_change($entity);
+}
+
+/**
+ * Implements hook_entity_delete().
+ *
+ * Regenerates sitemap when content is deleted.
+ */
+function xmlsitemap_domain_entity_delete(EntityInterface $entity) {
+  _xmlsitemap_domain_regenerate_on_entity_change($entity);
+}
+
+/**
+ * Helper function to regenerate sitemap on entity changes.
+ */
+function _xmlsitemap_domain_regenerate_on_entity_change(EntityInterface $entity) {
+  // Only regenerate for content entities with domain field.
+  if (!$entity->hasField('field_domain_access') &&
+      !$entity->getEntityType()->get('field_ui_base_route')) {
+    return;
+  }
+
+  // Check if this entity type is included in sitemap.
+  $entity_type = $entity->getEntityTypeId();
+  $bundle = $entity->bundle();
+
+  $settings = \Drupal::config("xmlsitemap.settings.$entity_type.$bundle");
+  if ($settings && $settings->get('status')) {
+    // Queue sitemap regeneration.
+    \Drupal::state()->set('xmlsitemap_regenerate_needed', TRUE);
+
+    // Optionally trigger immediate regeneration.
+    if (\Drupal::config('xmlsitemap_domain.settings')->get('auto_regenerate')) {
+      xmlsitemap_domain_regenerate_all_sitemaps();
+    }
+  }
+}
+
+/**
+ * Regenerates all domain-specific sitemaps.
+ */
+function xmlsitemap_domain_regenerate_all_sitemaps() {
+  if (\Drupal::moduleHandler()->moduleExists('domain')) {
+    $domain_storage = \Drupal::entityTypeManager()->getStorage('domain');
+    $domains = $domain_storage->loadMultiple();
+
+    foreach ($domains as $domain) {
+      // Regenerate sitemap for each domain.
+      xmlsitemap_domain_regenerate_sitemap($domain->id());
+    }
+  }
+
+  // Also regenerate the default sitemap.
+  xmlsitemap_regenerate_batch();
+}
+
+/**
+ * Regenerates sitemap for a specific domain.
+ *
+ * @param string $domain_id
+ *   The domain ID.
+ */
+function xmlsitemap_domain_regenerate_sitemap($domain_id) {
+  // Set context for current domain.
+  \Drupal::state()->set('xmlsitemap_domain_context', $domain_id);
+
+  // Trigger sitemap regeneration.
+  xmlsitemap_regenerate_batch();
+
+  // Clear domain context.
+  \Drupal::state()->delete('xmlsitemap_domain_context');
+}
+
+/**
+ * Implements hook_xmlsitemap_link_alter().
+ *
+ * Filters sitemap links based on domain context.
+ */
+function xmlsitemap_domain_xmlsitemap_link_alter(&$link, EntityInterface $entity) {
+  $current_domain = \Drupal::state()->get('xmlsitemap_domain_context');
+
+  if (!$current_domain) {
+    return;
+  }
+
+  // Check if entity has domain access field.
+  if ($entity->hasField('field_domain_access')) {
+    $domain_values = $entity->get('field_domain_access')->getValue();
+    $entity_domains = array_column($domain_values, 'target_id');
+
+    // Exclude link if not associated with current domain.
+    if (!empty($entity_domains) && !in_array($current_domain, $entity_domains)) {
+      $link['access'] = FALSE;
+      $link['status'] = FALSE;
+    }
+  }
+}
+
+/**
+ * Implements hook_xmlsitemap_links_alter().
+ *
+ * Filters custom sitemap links by domain.
+ */
+function xmlsitemap_domain_xmlsitemap_links_alter(&$links) {
+  $current_domain = \Drupal::state()->get('xmlsitemap_domain_context');
+
+  if (!$current_domain) {
+    return;
+  }
+
+  // Load domain associations from database.
+  $query = \Drupal::database()->select('xmlsitemap_domain', 'xd')
+    ->fields('xd', ['link_id', 'domain_id'])
+    ->condition('domain_id', $current_domain);
+
+  $domain_links = $query->execute()->fetchAllKeyed();
+
+  foreach ($links as $key => &$link) {
+    if (isset($link['id'])) {
+      // Check if this link is associated with current domain.
+      if (!isset($domain_links[$link['id']])) {
+        // Exclude links not associated with current domain.
+        unset($links[$key]);
+      }
+    }
+  }
+}

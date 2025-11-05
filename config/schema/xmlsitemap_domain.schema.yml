@@ -1,0 +1,7 @@
+xmlsitemap_domain.settings:
+  type: config_object
+  label: 'XML Sitemap Domain settings'
+  mapping:
+    auto_regenerate:
+      type: boolean
+      label: 'Automatically regenerate sitemaps when content changes'
