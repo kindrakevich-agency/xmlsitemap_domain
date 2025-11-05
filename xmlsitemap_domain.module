@@ -95,12 +95,15 @@ function xmlsitemap_domain_settings_form_submit($form, FormStateInterface $form_
   foreach ($enabled_domains as $domain_id) {
     $context = ['domain' => $domain_id];
 
-    // Try to load existing sitemap with this context.
-    $sitemap = xmlsitemap_sitemap_load_by_context($context);
+    // Query for existing sitemaps with this context.
+    $query = $sitemap_storage->getQuery();
+    $query->condition('context.domain', $domain_id);
+    $ids = $query->accessCheck(FALSE)->execute();
 
-    if (!$sitemap) {
+    if (empty($ids)) {
       // Create new sitemap for this domain.
       $sitemap = $sitemap_storage->create([
+        'id' => 'domain_' . $domain_id,
         'label' => t('Domain: @id', ['@id' => $domain_id]),
         'context' => $context,
       ]);
@@ -109,13 +112,19 @@ function xmlsitemap_domain_settings_form_submit($form, FormStateInterface $form_
       \Drupal::logger('xmlsitemap_domain')->notice('Created sitemap for domain: @domain', [
         '@domain' => $domain_id,
       ]);
+    } else {
+      \Drupal::logger('xmlsitemap_domain')->notice('Sitemap already exists for domain: @domain', [
+        '@domain' => $domain_id,
+      ]);
     }
-
-    // Queue for regeneration.
-    \Drupal::state()->set('xmlsitemap_regenerate_needed', TRUE);
   }
 
-  \Drupal::messenger()->addStatus(t('Domain-specific sitemaps have been configured. Please rebuild sitemaps.'));
+  // Queue for regeneration.
+  \Drupal::state()->set('xmlsitemap_regenerate_needed', TRUE);
+
+  \Drupal::messenger()->addStatus(t('Domain-specific sitemaps have been configured. Please rebuild sitemaps at the <a href=":url">rebuild page</a>.', [
+    ':url' => '/admin/config/search/xmlsitemap/rebuild',
+  ]));
 }
 
 /**
@@ -166,11 +175,8 @@ function _xmlsitemap_domain_regenerate_on_entity_change(EntityInterface $entity)
   // Regenerate sitemaps for affected domains.
   foreach ($affected_domains as $domain_id) {
     if (in_array($domain_id, $enabled_domains)) {
-      $context = ['domain' => $domain_id];
-      $sitemap = xmlsitemap_sitemap_load_by_context($context);
-      if ($sitemap) {
-        xmlsitemap_sitemap_save($sitemap);
-      }
+      // Just mark as needing regeneration.
+      \Drupal::state()->set('xmlsitemap_regenerate_needed', TRUE);
     }
   }
 }
