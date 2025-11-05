@@ -9,19 +9,11 @@
 
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Entity\EntityInterface;
-use Drupal\Core\Url;
 
 /**
  * Implements hook_form_alter().
- *
- * Adds domain management to XML Sitemap configuration.
  */
 function xmlsitemap_domain_form_alter(&$form, FormStateInterface $form_state, $form_id) {
-  // Debug: Log xmlsitemap form IDs to help troubleshooting.
-  if (strpos($form_id, 'xmlsitemap') !== FALSE) {
-    \Drupal::logger('xmlsitemap_domain')->notice('Form ID: @form_id', ['@form_id' => $form_id]);
-  }
-
   // Target the main XML Sitemap settings form.
   if ($form_id === 'xmlsitemap_admin_settings') {
     _xmlsitemap_domain_add_domain_management($form, $form_state);
@@ -61,7 +53,7 @@ function _xmlsitemap_domain_add_domain_management(&$form, FormStateInterface $fo
   $form['xmlsitemap_domain']['enabled_domains'] = [
     '#type' => 'checkboxes',
     '#title' => t('Enable sitemaps for domains'),
-    '#description' => t('Select which domains should have their own sitemap. Each enabled domain will generate a sitemap at /sitemap-[domain_id].xml'),
+    '#description' => t('Select which domains should have their own sitemap. Each enabled domain will generate a sitemap at /sitemap.xml when accessed from that domain.'),
     '#options' => [],
     '#default_value' => $enabled_domains,
   ];
@@ -97,12 +89,13 @@ function xmlsitemap_domain_settings_form_submit($form, FormStateInterface $form_
   $enabled_domains = array_filter($form_state->getValue('enabled_domains', []));
   \Drupal::state()->set('xmlsitemap_domain_enabled', $enabled_domains);
 
-  \Drupal::messenger()->addStatus(t('Domain-specific sitemaps have been configured. Sitemaps will be regenerated.'));
-
-  // Trigger regeneration for each enabled domain.
+  // Create separate sitemap contexts for each enabled domain.
   foreach ($enabled_domains as $domain_id) {
-    xmlsitemap_domain_regenerate_sitemap($domain_id);
+    $context = ['domain' => $domain_id];
+    xmlsitemap_sitemap_save(['context' => $context]);
   }
+
+  \Drupal::messenger()->addStatus(t('Domain-specific sitemaps have been configured.'));
 }
 
 /**
@@ -153,48 +146,61 @@ function _xmlsitemap_domain_regenerate_on_entity_change(EntityInterface $entity)
   // Regenerate sitemaps for affected domains.
   foreach ($affected_domains as $domain_id) {
     if (in_array($domain_id, $enabled_domains)) {
-      xmlsitemap_domain_regenerate_sitemap($domain_id);
+      $context = ['domain' => $domain_id];
+      $sitemap = xmlsitemap_sitemap_load_by_context($context);
+      if ($sitemap) {
+        xmlsitemap_sitemap_save($sitemap);
+      }
     }
   }
 }
 
 /**
- * Regenerates sitemap for a specific domain.
+ * Implements hook_xmlsitemap_sitemap_context().
+ *
+ * Sets the context based on the active domain.
  */
-function xmlsitemap_domain_regenerate_sitemap($domain_id) {
-  // Simply trigger sitemap regeneration.
-  // The domain context will be determined at access time, not generation time.
-  \Drupal::state()->set('xmlsitemap_regenerate_needed', TRUE);
-}
+function xmlsitemap_domain_xmlsitemap_sitemap_context() {
+  $contexts = [];
 
-/**
- * Implements hook_xmlsitemap_links_alter().
- */
-function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $entity_type_id) {
   // Check if domain module is available.
   if (!\Drupal::moduleHandler()->moduleExists('domain')) {
-    return;
+    return $contexts;
   }
 
   // Get the active domain.
   $domain_negotiator = \Drupal::service('domain.negotiator');
   $active_domain = $domain_negotiator->getActiveDomain();
 
-  if (!$active_domain) {
+  if ($active_domain) {
+    $current_domain_id = $active_domain->id();
+
+    // Check if this domain has sitemap enabled.
+    $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
+
+    if (in_array($current_domain_id, $enabled_domains)) {
+      $contexts[] = ['domain' => $current_domain_id];
+    }
+  }
+
+  return $contexts;
+}
+
+/**
+ * Implements hook_xmlsitemap_links_alter().
+ */
+function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $entity_type_id) {
+  // Only filter if we have a domain context.
+  if (empty($context['domain'])) {
     return;
   }
 
-  $current_domain_id = $active_domain->id();
+  $current_domain_id = $context['domain'];
 
-  // Log for debugging.
-  \Drupal::logger('xmlsitemap_domain')->notice('Filtering links for domain: @domain', ['@domain' => $current_domain_id]);
-
-  // Check if this domain has sitemap enabled.
-  $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
-  if (!in_array($current_domain_id, $enabled_domains)) {
-    \Drupal::logger('xmlsitemap_domain')->notice('Domain @domain not enabled for sitemaps', ['@domain' => $current_domain_id]);
-    return;
-  }
+  \Drupal::logger('xmlsitemap_domain')->notice('Filtering links for domain context: @domain (total links: @count)', [
+    '@domain' => $current_domain_id,
+    '@count' => count($links),
+  ]);
 
   $removed_count = 0;
   $kept_count = 0;
@@ -247,79 +253,39 @@ function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $enti
 /**
  * Implements hook_xmlsitemap_element_alter().
  *
- * Rewrites URLs to use the active domain's base URL.
+ * Rewrites URLs to use the domain's base URL from context.
  */
 function xmlsitemap_domain_xmlsitemap_element_alter(array &$element, array $link, $sitemap) {
-  // Check if domain module is available.
-  if (!\Drupal::moduleHandler()->moduleExists('domain')) {
+  // Only rewrite if we have a domain context.
+  $context = $sitemap->getContext();
+  if (empty($context['domain'])) {
     return;
   }
 
-  // Get the active domain.
-  $domain_negotiator = \Drupal::service('domain.negotiator');
-  $active_domain = $domain_negotiator->getActiveDomain();
+  $domain_id = $context['domain'];
 
-  if (!$active_domain) {
-    return;
-  }
+  // Load the domain.
+  try {
+    $domain_storage = \Drupal::entityTypeManager()->getStorage('domain');
+    $domain = $domain_storage->load($domain_id);
 
-  // Check if this domain has sitemap enabled.
-  $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
-  if (!in_array($active_domain->id(), $enabled_domains)) {
-    return;
-  }
+    if ($domain && !empty($element['loc'])) {
+      $current_url = $element['loc'];
 
-  // Rewrite the URL to use the active domain's base URL.
-  if (!empty($element['loc'])) {
-    $current_url = $element['loc'];
+      // Parse the current URL and replace the domain.
+      $parsed = parse_url($current_url);
 
-    // Parse the current URL and replace the domain.
-    $parsed = parse_url($current_url);
+      if ($parsed) {
+        $domain_url = $domain->getScheme() . $domain->getHostname();
+        $path = $parsed['path'] ?? '/';
+        $query = !empty($parsed['query']) ? '?' . $parsed['query'] : '';
+        $fragment = !empty($parsed['fragment']) ? '#' . $parsed['fragment'] : '';
 
-    if ($parsed) {
-      $domain_url = $active_domain->getScheme() . $active_domain->getHostname();
-      $path = $parsed['path'] ?? '/';
-      $query = !empty($parsed['query']) ? '?' . $parsed['query'] : '';
-      $fragment = !empty($parsed['fragment']) ? '#' . $parsed['fragment'] : '';
-
-      $element['loc'] = $domain_url . $path . $query . $fragment;
+        $element['loc'] = $domain_url . $path . $query . $fragment;
+      }
     }
   }
-}
-
-/**
- * Implements hook_page_attachments().
- */
-function xmlsitemap_domain_page_attachments(array &$attachments) {
-  // Check if we're on a domain.
-  if (!\Drupal::moduleHandler()->moduleExists('domain')) {
-    return;
-  }
-
-  $domain_negotiator = \Drupal::service('domain.negotiator');
-  $active_domain = $domain_negotiator->getActiveDomain();
-
-  if (!$active_domain) {
-    return;
-  }
-
-  // Check if this domain has sitemap enabled.
-  $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
-
-  if (in_array($active_domain->id(), $enabled_domains)) {
-    // Add link to domain-specific sitemap in HTML head.
-    $sitemap_url = '/sitemap.xml';
-    $attachments['#attached']['html_head'][] = [
-      [
-        '#tag' => 'link',
-        '#attributes' => [
-          'rel' => 'sitemap',
-          'type' => 'application/xml',
-          'title' => 'Sitemap',
-          'href' => $sitemap_url,
-        ],
-      ],
-      'xmlsitemap_domain_sitemap',
-    ];
+  catch (\Exception $e) {
+    // Skip if domain can't be loaded.
   }
 }
