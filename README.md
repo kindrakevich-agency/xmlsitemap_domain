@@ -4,11 +4,11 @@ A Drupal 11 module that integrates XML Sitemap with Domain Access to create sepa
 
 ## Features
 
-- Create individual sitemaps for each domain
-- Select domain when adding a new XML sitemap
+- Enable per-domain sitemaps via simple checkbox configuration
+- Automatic content filtering based on domain access
 - Automatic sitemap regeneration when content is added, updated, or deleted
-- Per-domain content filtering in sitemaps
-- Support for domain-specific URLs in sitemaps
+- Domain-specific sitemap URLs
+- Support for domain-specific base URLs in sitemaps
 
 ## Requirements
 
@@ -37,39 +37,37 @@ A Drupal 11 module that integrates XML Sitemap with Domain Access to create sepa
 
 ## Usage
 
-### Creating Per-Domain Sitemaps
+### Enabling Per-Domain Sitemaps
 
-1. Navigate to **Configuration > Search and metadata > XML Sitemap** (`/admin/config/search/xmlsitemap`)
+1. Navigate to **Configuration > Search and metadata > XML Sitemap > Settings** (`/admin/config/search/xmlsitemap/settings`)
 
-2. Click **"Add sitemap"** (`/admin/config/search/xmlsitemap/add`)
+2. You will see a new section called **"Domain-Specific Sitemaps"**
 
-3. Fill in the sitemap details:
-   - **Label**: Give your sitemap a descriptive name (e.g., "Main Site Sitemap" or "Blog Domain Sitemap")
-   - **Domain**: **Select the domain** for this sitemap from the dropdown
-   - Configure other sitemap settings as needed
+3. Check the boxes for the domains you want to enable sitemaps for
 
-4. Click **"Save"** to create the sitemap
+4. Click **"Save configuration"**
 
-5. Repeat steps 2-4 for each domain to create separate sitemaps
+5. The module will automatically:
+   - Generate separate sitemaps for each enabled domain
+   - Filter content based on domain assignments
+   - Provide sitemap URLs for each domain
 
-### Example: Setting Up Multiple Domain Sitemaps
+### Sitemap URLs
 
-If you have three domains:
-- example.com (main site)
-- blog.example.com (blog)
-- shop.example.com (shop)
+Once configured, each domain will have its own sitemap available at:
+- `/sitemap-[domain_id].xml`
 
-Create three separate sitemaps:
-1. Sitemap #1: Label "Main Site", Domain: example.com
-2. Sitemap #2: Label "Blog Site", Domain: blog.example.com
-3. Sitemap #3: Label "Shop Site", Domain: shop.example.com
+For example, if you have domains with IDs:
+- `example_com` → `/sitemap-example_com.xml`
+- `blog_example_com` → `/sitemap-blog_example_com.xml`
+- `shop_example_com` → `/sitemap-shop_example_com.xml`
 
-Each sitemap will only include content assigned to its respective domain.
+The settings page will show you the exact URLs for each enabled domain.
 
 ### Automatic Sitemap Regeneration
 
 The module automatically regenerates the appropriate domain sitemaps when:
-- New content is created (assigned to specific domains)
+- New content is created and assigned to specific domains
 - Content is updated or domain assignments change
 - Content is deleted
 
@@ -85,9 +83,43 @@ Only content assigned to a sitemap's domain will appear in that sitemap.
 
 ## Configuration
 
+### Auto-Regeneration
+
 The module includes automatic regeneration settings:
 - **Auto-regenerate**: Enabled by default
 - Automatically queues sitemaps for regeneration when relevant content changes
+
+You can configure this at: Configuration > XML Sitemap Domain Settings
+
+### Domain Setup
+
+Before using this module, ensure you have:
+1. Domain Access module installed and configured
+2. At least one domain created in **Configuration > Domain Access**
+3. Content types configured with `field_domain_access` field
+
+## Troubleshooting
+
+### "Domain-Specific Sitemaps" section not appearing
+
+1. **Clear cache**: Run `drush cr` or clear cache via admin interface
+2. **Check dependencies**: Ensure Domain Access module is enabled
+3. **Check form ID**: Look in your Drupal logs for "Form ID:" messages from xmlsitemap_domain
+4. **Check permissions**: Ensure you have permission to configure XML Sitemap
+
+### Content not appearing in domain sitemap
+
+1. Verify the content has the correct domain assigned in the **Domain Access** field
+2. Check that the content type is enabled in XML Sitemap settings
+3. Clear cache and regenerate the sitemap
+4. Check that the domain is enabled in the Domain-Specific Sitemaps section
+
+### Sitemap returns 404
+
+1. Ensure the domain is enabled in the settings
+2. Clear all caches
+3. Run cron to regenerate sitemaps
+4. Check the exact sitemap URL in the settings page
 
 ## Technical Details
 
@@ -100,19 +132,18 @@ The module includes automatic regeneration settings:
 
 ### Data Storage
 
-The module uses Drupal State API to store domain-to-sitemap associations:
-- **State key**: `xmlsitemap_domain_mapping`
-- **Format**: Array mapping sitemap context keys to domain IDs
+The module uses Drupal State API to store configuration:
+- **State key**: `xmlsitemap_domain_enabled` - Array of enabled domain IDs
+- **State key**: `xmlsitemap_domain_current` - Current domain context during generation
 
 ### Hooks Implemented
 
-- `hook_form_FORM_ID_alter()` - Adds domain field to sitemap add/edit forms
+- `hook_form_alter()` - Adds domain checkboxes to XML Sitemap settings form
 - `hook_entity_insert()` - Triggers regeneration on new content
 - `hook_entity_update()` - Triggers regeneration on content updates
 - `hook_entity_delete()` - Triggers regeneration on content deletion
-- `hook_xmlsitemap_link_alter()` - Filters content by domain in sitemaps
-- `hook_xmlsitemap_context_alter()` - Adds domain info to sitemap context
-- `hook_xmlsitemap_context_url_options_alter()` - Sets domain-specific base URLs
+- `hook_xmlsitemap_links_alter()` - Filters content by domain in sitemaps
+- `hook_page_attachments()` - Adds sitemap link to HTML head
 
 ### Domain Field Requirements
 
@@ -122,19 +153,17 @@ For the module to work properly, your content types should have:
 
 These fields are typically created by the Domain Access module.
 
-## Troubleshooting
+### Debugging
 
-### Content not appearing in sitemap
+The module logs form IDs to help with troubleshooting. Check your Drupal logs at:
+- **Admin > Reports > Recent log messages**
+- Look for messages from `xmlsitemap_domain`
 
-1. Verify the content has the correct domain assigned in the **Domain Access** field
-2. Check that the content type is enabled in XML Sitemap settings
-3. Clear cache and regenerate the sitemap
+## Known Limitations
 
-### Sitemap not regenerating automatically
-
-1. Check that **Auto-regenerate** is enabled in module settings
-2. Verify cron is running properly
-3. Manually regenerate from the XML Sitemap admin interface
+- Sitemap URLs use domain IDs, not domain hostnames
+- Per-domain sitemap index files not yet supported
+- Requires manual cache clear after configuration changes
 
 ## Support
 
