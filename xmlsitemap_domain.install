@@ -6,35 +6,6 @@
  */
 
 /**
- * Implements hook_schema().
- */
-function xmlsitemap_domain_schema() {
-  $schema['xmlsitemap_domain'] = [
-    'description' => 'Stores domain associations for XML sitemap custom links.',
-    'fields' => [
-      'link_id' => [
-        'type' => 'varchar',
-        'length' => 255,
-        'not null' => TRUE,
-        'description' => 'The XML sitemap custom link ID.',
-      ],
-      'domain_id' => [
-        'type' => 'varchar',
-        'length' => 255,
-        'not null' => TRUE,
-        'description' => 'The domain ID.',
-      ],
-    ],
-    'primary key' => ['link_id'],
-    'indexes' => [
-      'domain_id' => ['domain_id'],
-    ],
-  ];
-
-  return $schema;
-}
-
-/**
  * Implements hook_install().
  */
 function xmlsitemap_domain_install() {
@@ -43,7 +14,10 @@ function xmlsitemap_domain_install() {
     ->set('auto_regenerate', TRUE)
     ->save();
 
-  \Drupal::messenger()->addStatus(t('XML Sitemap Domain module has been installed successfully.'));
+  // Initialize empty domain mapping.
+  \Drupal::state()->set('xmlsitemap_domain_mapping', []);
+
+  \Drupal::messenger()->addStatus(t('XML Sitemap Domain module has been installed successfully. You can now create separate sitemaps for each domain at Configuration > Search and metadata > XML Sitemap.'));
 }
 
 /**
@@ -52,6 +26,9 @@ function xmlsitemap_domain_install() {
 function xmlsitemap_domain_uninstall() {
   // Clean up configuration.
   \Drupal::configFactory()->getEditable('xmlsitemap_domain.settings')->delete();
+
+  // Clean up state.
+  \Drupal::state()->delete('xmlsitemap_domain_mapping');
 
   \Drupal::messenger()->addStatus(t('XML Sitemap Domain module has been uninstalled successfully.'));
 }
