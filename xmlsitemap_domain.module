@@ -267,7 +267,7 @@ function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
   $sitemap = $query->getMetaData('sitemap');
 
   if (empty($sitemap->context['domain'])) {
-    \Drupal::logger('xmlsitemap_domain')->notice('No domain in sitemap context');
+    \Drupal::logger('xmlsitemap_domain')->notice('No domain in sitemap context - skipping filter');
     return;
   }
 
@@ -277,23 +277,26 @@ function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
     '@domain' => $domain_id,
   ]);
 
-  // Join with node field data to filter by domain.
-  $query->leftJoin('node__field_domain_access', 'nfd', 'xmlsitemap.type = :node_type AND xmlsitemap.id = nfd.entity_id', [
-    ':node_type' => 'node',
+  // Get the main table alias (usually 'x' or 'xmlsitemap').
+  $tables = $query->getTables();
+  $base_table = reset($tables);
+  $base_alias = $base_table['alias'];
+
+  \Drupal::logger('xmlsitemap_domain')->notice('Base table alias: @alias', [
+    '@alias' => $base_alias,
   ]);
+
+  // Join with node field data to filter by domain.
+  $query->leftJoin('node__field_domain_access', 'nfd', "$base_alias.type = 'node' AND $base_alias.id = nfd.entity_id");
 
   // Also check for "all affiliates" field.
-  $query->leftJoin('node__field_domain_all_affiliates', 'nfda', 'xmlsitemap.type = :node_type2 AND xmlsitemap.id = nfda.entity_id', [
-    ':node_type2' => 'node',
-  ]);
+  $query->leftJoin('node__field_domain_all_affiliates', 'nfda', "$base_alias.type = 'node' AND $base_alias.id = nfda.entity_id");
 
-  // Build condition: either matches domain OR has all affiliates set.
+  // Build condition: either matches domain OR has all affiliates set OR is not a node.
   $or = $query->orConditionGroup();
   $or->condition('nfd.field_domain_access_target_id', $domain_id);
   $or->condition('nfda.field_domain_all_affiliates_value', 1);
-
-  // Also include non-node entities.
-  $or->condition('xmlsitemap.type', 'node', '<>');
+  $or->condition("$base_alias.type", 'node', '<>');
 
   $query->condition($or);
 
