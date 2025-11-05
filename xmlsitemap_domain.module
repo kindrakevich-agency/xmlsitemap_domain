@@ -161,10 +161,13 @@ function _xmlsitemap_domain_regenerate_on_entity_change(EntityInterface $entity)
  * Sets the context based on the active domain.
  */
 function xmlsitemap_domain_xmlsitemap_sitemap_context() {
+  \Drupal::logger('xmlsitemap_domain')->notice('hook_xmlsitemap_sitemap_context() called');
+
   $contexts = [];
 
   // Check if domain module is available.
   if (!\Drupal::moduleHandler()->moduleExists('domain')) {
+    \Drupal::logger('xmlsitemap_domain')->warning('Domain module not available');
     return $contexts;
   }
 
@@ -172,14 +175,29 @@ function xmlsitemap_domain_xmlsitemap_sitemap_context() {
   $domain_negotiator = \Drupal::service('domain.negotiator');
   $active_domain = $domain_negotiator->getActiveDomain();
 
+  \Drupal::logger('xmlsitemap_domain')->notice('Active domain: @domain', [
+    '@domain' => $active_domain ? $active_domain->id() : 'none',
+  ]);
+
   if ($active_domain) {
     $current_domain_id = $active_domain->id();
 
     // Check if this domain has sitemap enabled.
     $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
 
+    \Drupal::logger('xmlsitemap_domain')->notice('Enabled domains: @domains', [
+      '@domains' => implode(', ', $enabled_domains),
+    ]);
+
     if (in_array($current_domain_id, $enabled_domains)) {
       $contexts[] = ['domain' => $current_domain_id];
+      \Drupal::logger('xmlsitemap_domain')->notice('Returning context for domain: @domain', [
+        '@domain' => $current_domain_id,
+      ]);
+    } else {
+      \Drupal::logger('xmlsitemap_domain')->warning('Domain @domain not in enabled list', [
+        '@domain' => $current_domain_id,
+      ]);
     }
   }
 
