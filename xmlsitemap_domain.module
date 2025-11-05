@@ -186,11 +186,18 @@ function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $enti
 
   $current_domain_id = $active_domain->id();
 
+  // Log for debugging.
+  \Drupal::logger('xmlsitemap_domain')->notice('Filtering links for domain: @domain', ['@domain' => $current_domain_id]);
+
   // Check if this domain has sitemap enabled.
   $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
   if (!in_array($current_domain_id, $enabled_domains)) {
+    \Drupal::logger('xmlsitemap_domain')->notice('Domain @domain not enabled for sitemaps', ['@domain' => $current_domain_id]);
     return;
   }
+
+  $removed_count = 0;
+  $kept_count = 0;
 
   // Filter links based on domain access.
   foreach ($links as $key => $link) {
@@ -217,6 +224,9 @@ function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $enti
             // Exclude if not in this domain.
             if (!$all_affiliates && !empty($entity_domains) && !in_array($current_domain_id, $entity_domains)) {
               unset($links[$key]);
+              $removed_count++;
+            } else {
+              $kept_count++;
             }
           }
         }
@@ -227,6 +237,11 @@ function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $enti
       }
     }
   }
+
+  \Drupal::logger('xmlsitemap_domain')->notice('Domain filtering complete: kept @kept, removed @removed', [
+    '@kept' => $kept_count,
+    '@removed' => $removed_count,
+  ]);
 }
 
 /**
