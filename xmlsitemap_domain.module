@@ -89,13 +89,33 @@ function xmlsitemap_domain_settings_form_submit($form, FormStateInterface $form_
   $enabled_domains = array_filter($form_state->getValue('enabled_domains', []));
   \Drupal::state()->set('xmlsitemap_domain_enabled', $enabled_domains);
 
-  // Create separate sitemap contexts for each enabled domain.
+  // Create/update sitemap entries for each enabled domain.
+  $sitemap_storage = \Drupal::entityTypeManager()->getStorage('xmlsitemap');
+
   foreach ($enabled_domains as $domain_id) {
     $context = ['domain' => $domain_id];
-    xmlsitemap_sitemap_save(['context' => $context]);
+
+    // Try to load existing sitemap with this context.
+    $sitemap = xmlsitemap_sitemap_load_by_context($context);
+
+    if (!$sitemap) {
+      // Create new sitemap for this domain.
+      $sitemap = $sitemap_storage->create([
+        'label' => t('Domain: @id', ['@id' => $domain_id]),
+        'context' => $context,
+      ]);
+      $sitemap->save();
+
+      \Drupal::logger('xmlsitemap_domain')->notice('Created sitemap for domain: @domain', [
+        '@domain' => $domain_id,
+      ]);
+    }
+
+    // Queue for regeneration.
+    \Drupal::state()->set('xmlsitemap_regenerate_needed', TRUE);
   }
 
-  \Drupal::messenger()->addStatus(t('Domain-specific sitemaps have been configured.'));
+  \Drupal::messenger()->addStatus(t('Domain-specific sitemaps have been configured. Please rebuild sitemaps.'));
 }
 
 /**
@@ -153,6 +173,34 @@ function _xmlsitemap_domain_regenerate_on_entity_change(EntityInterface $entity)
       }
     }
   }
+}
+
+/**
+ * Implements hook_xmlsitemap_context_info().
+ *
+ * Register the domain context type.
+ */
+function xmlsitemap_domain_xmlsitemap_context_info() {
+  $info['domain'] = [
+    'label' => t('Domain'),
+    'summary callback' => 'xmlsitemap_domain_context_summary',
+    'default' => '',
+  ];
+  return $info;
+}
+
+/**
+ * Callback to provide a summary of the domain context.
+ */
+function xmlsitemap_domain_context_summary($context) {
+  if (!empty($context['domain'])) {
+    $domain_storage = \Drupal::entityTypeManager()->getStorage('domain');
+    $domain = $domain_storage->load($context['domain']);
+    if ($domain) {
+      return t('Domain: @label', ['@label' => $domain->label()]);
+    }
+  }
+  return t('All domains');
 }
 
 /**
