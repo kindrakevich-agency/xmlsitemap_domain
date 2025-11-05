@@ -1,0 +1,34 @@
+<?php
+
+/**
+ * @file
+ * Installation file for XML Sitemap Domain module.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function xmlsitemap_domain_install() {
+  // Set default configuration.
+  \Drupal::configFactory()->getEditable('xmlsitemap_domain.settings')
+    ->set('auto_regenerate', TRUE)
+    ->save();
+
+  // Initialize empty domain mapping.
+  \Drupal::state()->set('xmlsitemap_domain_mapping', []);
+
+  \Drupal::messenger()->addStatus(t('XML Sitemap Domain module has been installed successfully. You can now create separate sitemaps for each domain at Configuration > Search and metadata > XML Sitemap.'));
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function xmlsitemap_domain_uninstall() {
+  // Clean up configuration.
+  \Drupal::configFactory()->getEditable('xmlsitemap_domain.settings')->delete();
+
+  // Clean up state.
+  \Drupal::state()->delete('xmlsitemap_domain_mapping');
+
+  \Drupal::messenger()->addStatus(t('XML Sitemap Domain module has been uninstalled successfully.'));
+}

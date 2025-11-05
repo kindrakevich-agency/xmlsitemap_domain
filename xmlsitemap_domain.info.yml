@@ -1,0 +1,9 @@
+name: 'XML Sitemap Domain'
+type: module
+description: 'Integrates XML Sitemap with Domain Access module to generate per-domain sitemaps.'
+core_version_requirement: ^11
+package: 'XML Sitemap'
+
+dependencies:
+  - xmlsitemap:xmlsitemap
+  - domain:domain
