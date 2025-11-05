@@ -162,23 +162,33 @@ function _xmlsitemap_domain_regenerate_on_entity_change(EntityInterface $entity)
  * Regenerates sitemap for a specific domain.
  */
 function xmlsitemap_domain_regenerate_sitemap($domain_id) {
-  // Set the current domain context for sitemap generation.
-  \Drupal::state()->set('xmlsitemap_domain_current', $domain_id);
-
-  // Queue the sitemap for regeneration.
+  // Simply trigger sitemap regeneration.
+  // The domain context will be determined at access time, not generation time.
   \Drupal::state()->set('xmlsitemap_regenerate_needed', TRUE);
-
-  // Clear the context.
-  \Drupal::state()->delete('xmlsitemap_domain_current');
 }
 
 /**
  * Implements hook_xmlsitemap_links_alter().
  */
 function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $entity_type_id) {
-  $current_domain = \Drupal::state()->get('xmlsitemap_domain_current');
+  // Check if domain module is available.
+  if (!\Drupal::moduleHandler()->moduleExists('domain')) {
+    return;
+  }
 
-  if (!$current_domain) {
+  // Get the active domain.
+  $domain_negotiator = \Drupal::service('domain.negotiator');
+  $active_domain = $domain_negotiator->getActiveDomain();
+
+  if (!$active_domain) {
+    return;
+  }
+
+  $current_domain_id = $active_domain->id();
+
+  // Check if this domain has sitemap enabled.
+  $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
+  if (!in_array($current_domain_id, $enabled_domains)) {
     return;
   }
 
@@ -186,32 +196,78 @@ function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $enti
   foreach ($links as $key => $link) {
     // Try to load the entity.
     if (!empty($link['id'])) {
-      list($entity_type, $entity_id) = explode(':', $link['id']);
+      $parts = explode(':', $link['id']);
+      if (count($parts) >= 2) {
+        list($entity_type, $entity_id) = $parts;
 
-      try {
-        $entity_storage = \Drupal::entityTypeManager()->getStorage($entity_type);
-        $entity = $entity_storage->load($entity_id);
+        try {
+          $entity_storage = \Drupal::entityTypeManager()->getStorage($entity_type);
+          $entity = $entity_storage->load($entity_id);
 
-        if ($entity && $entity->hasField('field_domain_access')) {
-          $domain_values = $entity->get('field_domain_access')->getValue();
-          $entity_domains = array_column($domain_values, 'target_id');
+          if ($entity && $entity->hasField('field_domain_access')) {
+            $domain_values = $entity->get('field_domain_access')->getValue();
+            $entity_domains = array_column($domain_values, 'target_id');
 
-          // Check for "All affiliates" option.
-          $all_affiliates = FALSE;
-          if ($entity->hasField('field_domain_all_affiliates')) {
-            $all_affiliates = $entity->get('field_domain_all_affiliates')->value;
-          }
+            // Check for "All affiliates" option.
+            $all_affiliates = FALSE;
+            if ($entity->hasField('field_domain_all_affiliates')) {
+              $all_affiliates = $entity->get('field_domain_all_affiliates')->value;
+            }
 
-          // Exclude if not in this domain.
-          if (!$all_affiliates && !empty($entity_domains) && !in_array($current_domain, $entity_domains)) {
-            unset($links[$key]);
+            // Exclude if not in this domain.
+            if (!$all_affiliates && !empty($entity_domains) && !in_array($current_domain_id, $entity_domains)) {
+              unset($links[$key]);
+            }
           }
         }
+        catch (\Exception $e) {
+          // Skip if entity can't be loaded.
+          continue;
+        }
       }
-      catch (\Exception $e) {
-        // Skip if entity can't be loaded.
-        continue;
-      }
+    }
+  }
+}
+
+/**
+ * Implements hook_xmlsitemap_element_alter().
+ *
+ * Rewrites URLs to use the active domain's base URL.
+ */
+function xmlsitemap_domain_xmlsitemap_element_alter(array &$element, array $link, $sitemap) {
+  // Check if domain module is available.
+  if (!\Drupal::moduleHandler()->moduleExists('domain')) {
+    return;
+  }
+
+  // Get the active domain.
+  $domain_negotiator = \Drupal::service('domain.negotiator');
+  $active_domain = $domain_negotiator->getActiveDomain();
+
+  if (!$active_domain) {
+    return;
+  }
+
+  // Check if this domain has sitemap enabled.
+  $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
+  if (!in_array($active_domain->id(), $enabled_domains)) {
+    return;
+  }
+
+  // Rewrite the URL to use the active domain's base URL.
+  if (!empty($element['loc'])) {
+    $current_url = $element['loc'];
+
+    // Parse the current URL and replace the domain.
+    $parsed = parse_url($current_url);
+
+    if ($parsed) {
+      $domain_url = $active_domain->getScheme() . $active_domain->getHostname();
+      $path = $parsed['path'] ?? '/';
+      $query = !empty($parsed['query']) ? '?' . $parsed['query'] : '';
+      $fragment = !empty($parsed['fragment']) ? '#' . $parsed['fragment'] : '';
+
+      $element['loc'] = $domain_url . $path . $query . $fragment;
     }
   }
 }

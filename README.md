@@ -75,11 +75,19 @@ This ensures your sitemaps stay up-to-date without manual intervention.
 
 ### How Content is Filtered
 
-Content is included in a domain's sitemap based on:
-- The **field_domain_access** field on the content
-- The **field_domain_all_affiliates** field (if content is available to all domains)
+When you access a domain's sitemap (e.g., `https://breakingua.news/sitemap.xml`), the module:
 
-Only content assigned to a sitemap's domain will appear in that sitemap.
+1. **Detects the active domain** - Uses Domain Access module to identify which domain you're on
+2. **Filters content** - Only includes content where:
+   - The **field_domain_access** field includes this domain, OR
+   - The **field_domain_all_affiliates** field is set to TRUE (content available to all domains)
+3. **Rewrites URLs** - Changes all URLs in the sitemap to use the current domain's base URL
+
+Example:
+- Content assigned to `breakingua.news` → appears in `https://breakingua.news/sitemap.xml`
+- Content assigned to `polissya.today` → appears in `https://polissya.today/sitemap.xml`
+- Content assigned to both → appears in both sitemaps
+- Content with "All affiliates" → appears in all enabled domain sitemaps
 
 ## Configuration
 
@@ -114,6 +122,21 @@ Before using this module, ensure you have:
 3. Clear cache and regenerate the sitemap
 4. Check that the domain is enabled in the Domain-Specific Sitemaps section
 
+### All domains show same content / wrong URL count
+
+If all domain sitemaps show the same number of URLs:
+1. **Clear all caches**: `drush cr`
+2. **Regenerate sitemaps**: Visit Configuration > XML Sitemap and click "Rebuild sitemap"
+3. **Check content domain assignments**: Ensure content has proper domain access fields set
+4. **Verify domains are enabled**: Check the Domain-Specific Sitemaps section
+
+### URLs show wrong domain
+
+If `https://breakingua.news/sitemap.xml` shows URLs like `https://new.polissya.today/...`:
+1. **Clear cache**: The URL rewriting is cached
+2. **Access via correct domain**: Make sure you're accessing the sitemap through the actual domain URL
+3. **Check domain configuration**: Verify the domain is configured correctly in Domain Access module
+
 ### Sitemap returns 404
 
 1. Ensure the domain is enabled in the settings
@@ -142,7 +165,8 @@ The module uses Drupal State API to store configuration:
 - `hook_entity_insert()` - Triggers regeneration on new content
 - `hook_entity_update()` - Triggers regeneration on content updates
 - `hook_entity_delete()` - Triggers regeneration on content deletion
-- `hook_xmlsitemap_links_alter()` - Filters content by domain in sitemaps
+- `hook_xmlsitemap_links_alter()` - Filters content by active domain in sitemaps
+- `hook_xmlsitemap_element_alter()` - Rewrites URLs to use active domain's base URL
 - `hook_page_attachments()` - Adds sitemap link to HTML head
 
 ### Domain Field Requirements
