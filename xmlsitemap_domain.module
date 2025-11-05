@@ -292,15 +292,28 @@ function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
   // Also check for "all affiliates" field.
   $query->leftJoin('node__field_domain_all_affiliates', 'nfda', "$base_alias.type = 'node' AND $base_alias.id = nfda.entity_id");
 
-  // Build condition: either matches domain OR has all affiliates set OR is not a node.
-  $or = $query->orConditionGroup();
-  $or->condition('nfd.field_domain_access_target_id', $domain_id);
-  $or->condition('nfda.field_domain_all_affiliates_value', 1);
-  $or->condition("$base_alias.type", 'node', '<>');
+  // Build condition: for nodes, must have domain match OR all affiliates
+  // For non-nodes, include everything
+  $node_condition = $query->andConditionGroup();
+  $node_condition->condition("$base_alias.type", 'node');
 
-  $query->condition($or);
+  $domain_or = $query->orConditionGroup();
+  $domain_or->condition('nfd.field_domain_access_target_id', $domain_id);
+  $domain_or->condition('nfda.field_domain_all_affiliates_value', 1);
 
+  $node_condition->condition($domain_or);
+
+  $final_or = $query->orConditionGroup();
+  $final_or->condition($node_condition);
+  $final_or->condition("$base_alias.type", 'node', '<>');
+
+  $query->condition($final_or);
+
+  // Debug: Log the query
   \Drupal::logger('xmlsitemap_domain')->notice('Query altered for domain filtering');
+  \Drupal::logger('xmlsitemap_domain')->notice('SQL: @sql', [
+    '@sql' => (string) $query,
+  ]);
 }
 
 /**
