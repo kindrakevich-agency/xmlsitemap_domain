@@ -23,7 +23,7 @@ function xmlsitemap_domain_form_alter(&$form, FormStateInterface $form_state, $f
   }
 
   // Target the main XML Sitemap settings form.
-  if ($form_id === 'xmlsitemap_settings_form') {
+  if ($form_id === 'xmlsitemap_admin_settings') {
     _xmlsitemap_domain_add_domain_management($form, $form_state);
   }
 }
