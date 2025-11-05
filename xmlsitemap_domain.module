@@ -78,9 +78,10 @@ function _xmlsitemap_domain_add_domain_management(&$form, FormStateInterface $fo
     '#markup' => '<p>' . t('After enabling domains, sitemaps will be available at:') . '</p><ul>',
   ];
 
-  $base_url = \Drupal::request()->getSchemeAndHttpHost();
   foreach ($domains as $domain_id => $domain) {
-    $sitemap_url = $base_url . '/sitemap-' . $domain_id . '.xml';
+    // Build proper domain URL.
+    $domain_url = $domain->getScheme() . $domain->getHostname();
+    $sitemap_url = $domain_url . '/sitemap.xml';
     $form['xmlsitemap_domain']['info']['#markup'] .= '<li><strong>' . $domain->label() . ':</strong> <a href="' . $sitemap_url . '" target="_blank">' . $sitemap_url . '</a></li>';
   }
   $form['xmlsitemap_domain']['info']['#markup'] .= '</ul>';
@@ -236,6 +237,7 @@ function xmlsitemap_domain_page_attachments(array &$attachments) {
 
   if (in_array($active_domain->id(), $enabled_domains)) {
     // Add link to domain-specific sitemap in HTML head.
+    $sitemap_url = '/sitemap.xml';
     $attachments['#attached']['html_head'][] = [
       [
         '#tag' => 'link',
@@ -243,10 +245,10 @@ function xmlsitemap_domain_page_attachments(array &$attachments) {
           'rel' => 'sitemap',
           'type' => 'application/xml',
           'title' => 'Sitemap',
-          'href' => Url::fromRoute('xmlsitemap_domain.sitemap', ['domain_id' => $active_domain->id()])->toString(),
+          'href' => $sitemap_url,
         ],
       ],
-      'xmlsitemap_domain_' . $active_domain->id(),
+      'xmlsitemap_domain_sitemap',
     ];
   }
 }
