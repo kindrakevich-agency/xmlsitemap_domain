@@ -156,19 +156,19 @@ function _xmlsitemap_domain_regenerate_on_entity_change(EntityInterface $entity)
 }
 
 /**
- * Implements hook_xmlsitemap_sitemap_context().
+ * Implements hook_xmlsitemap_context().
  *
- * Sets the context based on the active domain.
+ * Provide information about the current context on the site.
  */
-function xmlsitemap_domain_xmlsitemap_sitemap_context() {
-  \Drupal::logger('xmlsitemap_domain')->notice('hook_xmlsitemap_sitemap_context() called');
+function xmlsitemap_domain_xmlsitemap_context() {
+  \Drupal::logger('xmlsitemap_domain')->notice('hook_xmlsitemap_context() called');
 
-  $contexts = [];
+  $context = [];
 
   // Check if domain module is available.
   if (!\Drupal::moduleHandler()->moduleExists('domain')) {
     \Drupal::logger('xmlsitemap_domain')->warning('Domain module not available');
-    return $contexts;
+    return $context;
   }
 
   // Get the active domain.
@@ -190,8 +190,8 @@ function xmlsitemap_domain_xmlsitemap_sitemap_context() {
     ]);
 
     if (in_array($current_domain_id, $enabled_domains)) {
-      $contexts[] = ['domain' => $current_domain_id];
-      \Drupal::logger('xmlsitemap_domain')->notice('Returning context for domain: @domain', [
+      $context['domain'] = $current_domain_id;
+      \Drupal::logger('xmlsitemap_domain')->notice('Setting context domain: @domain', [
         '@domain' => $current_domain_id,
       ]);
     } else {
@@ -201,71 +201,49 @@ function xmlsitemap_domain_xmlsitemap_sitemap_context() {
     }
   }
 
-  return $contexts;
+  return $context;
 }
 
 /**
- * Implements hook_xmlsitemap_links_alter().
+ * Implements hook_query_xmlsitemap_generate_alter().
+ *
+ * Filter the sitemap query by domain.
  */
-function xmlsitemap_domain_xmlsitemap_links_alter(array &$links, $context, $entity_type_id) {
-  // Only filter if we have a domain context.
-  if (empty($context['domain'])) {
+function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
+  $sitemap = $query->getMetaData('sitemap');
+
+  if (empty($sitemap->context['domain'])) {
+    \Drupal::logger('xmlsitemap_domain')->notice('No domain in sitemap context');
     return;
   }
 
-  $current_domain_id = $context['domain'];
+  $domain_id = $sitemap->context['domain'];
 
-  \Drupal::logger('xmlsitemap_domain')->notice('Filtering links for domain context: @domain (total links: @count)', [
-    '@domain' => $current_domain_id,
-    '@count' => count($links),
+  \Drupal::logger('xmlsitemap_domain')->notice('Filtering query for domain: @domain', [
+    '@domain' => $domain_id,
   ]);
 
-  $removed_count = 0;
-  $kept_count = 0;
-
-  // Filter links based on domain access.
-  foreach ($links as $key => $link) {
-    // Try to load the entity.
-    if (!empty($link['id'])) {
-      $parts = explode(':', $link['id']);
-      if (count($parts) >= 2) {
-        list($entity_type, $entity_id) = $parts;
-
-        try {
-          $entity_storage = \Drupal::entityTypeManager()->getStorage($entity_type);
-          $entity = $entity_storage->load($entity_id);
-
-          if ($entity && $entity->hasField('field_domain_access')) {
-            $domain_values = $entity->get('field_domain_access')->getValue();
-            $entity_domains = array_column($domain_values, 'target_id');
-
-            // Check for "All affiliates" option.
-            $all_affiliates = FALSE;
-            if ($entity->hasField('field_domain_all_affiliates')) {
-              $all_affiliates = $entity->get('field_domain_all_affiliates')->value;
-            }
-
-            // Exclude if not in this domain.
-            if (!$all_affiliates && !empty($entity_domains) && !in_array($current_domain_id, $entity_domains)) {
-              unset($links[$key]);
-              $removed_count++;
-            } else {
-              $kept_count++;
-            }
-          }
-        }
-        catch (\Exception $e) {
-          // Skip if entity can't be loaded.
-          continue;
-        }
-      }
-    }
-  }
-
-  \Drupal::logger('xmlsitemap_domain')->notice('Domain filtering complete: kept @kept, removed @removed', [
-    '@kept' => $kept_count,
-    '@removed' => $removed_count,
+  // Join with node field data to filter by domain.
+  $query->leftJoin('node__field_domain_access', 'nfd', 'xmlsitemap.type = :node_type AND xmlsitemap.id = nfd.entity_id', [
+    ':node_type' => 'node',
   ]);
+
+  // Also check for "all affiliates" field.
+  $query->leftJoin('node__field_domain_all_affiliates', 'nfda', 'xmlsitemap.type = :node_type2 AND xmlsitemap.id = nfda.entity_id', [
+    ':node_type2' => 'node',
+  ]);
+
+  // Build condition: either matches domain OR has all affiliates set.
+  $or = $query->orConditionGroup();
+  $or->condition('nfd.field_domain_access_target_id', $domain_id);
+  $or->condition('nfda.field_domain_all_affiliates_value', 1);
+
+  // Also include non-node entities.
+  $or->condition('xmlsitemap.type', 'node', '<>');
+
+  $query->condition($or);
+
+  \Drupal::logger('xmlsitemap_domain')->notice('Query altered for domain filtering');
 }
 
 /**
