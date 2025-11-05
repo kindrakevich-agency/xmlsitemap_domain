@@ -108,14 +108,6 @@ function xmlsitemap_domain_settings_form_submit($form, FormStateInterface $form_
         'context' => $context,
       ]);
       $sitemap->save();
-
-      \Drupal::logger('xmlsitemap_domain')->notice('Created sitemap for domain: @domain', [
-        '@domain' => $domain_id,
-      ]);
-    } else {
-      \Drupal::logger('xmlsitemap_domain')->notice('Sitemap already exists for domain: @domain', [
-        '@domain' => $domain_id,
-      ]);
     }
   }
 
@@ -215,13 +207,10 @@ function xmlsitemap_domain_context_summary($context) {
  * Provide information about the current context on the site.
  */
 function xmlsitemap_domain_xmlsitemap_context() {
-  \Drupal::logger('xmlsitemap_domain')->notice('hook_xmlsitemap_context() called');
-
   $context = [];
 
   // Check if domain module is available.
   if (!\Drupal::moduleHandler()->moduleExists('domain')) {
-    \Drupal::logger('xmlsitemap_domain')->warning('Domain module not available');
     return $context;
   }
 
@@ -229,29 +218,14 @@ function xmlsitemap_domain_xmlsitemap_context() {
   $domain_negotiator = \Drupal::service('domain.negotiator');
   $active_domain = $domain_negotiator->getActiveDomain();
 
-  \Drupal::logger('xmlsitemap_domain')->notice('Active domain: @domain', [
-    '@domain' => $active_domain ? $active_domain->id() : 'none',
-  ]);
-
   if ($active_domain) {
     $current_domain_id = $active_domain->id();
 
     // Check if this domain has sitemap enabled.
     $enabled_domains = \Drupal::state()->get('xmlsitemap_domain_enabled', []);
 
-    \Drupal::logger('xmlsitemap_domain')->notice('Enabled domains: @domains', [
-      '@domains' => implode(', ', $enabled_domains),
-    ]);
-
     if (in_array($current_domain_id, $enabled_domains)) {
       $context['domain'] = $current_domain_id;
-      \Drupal::logger('xmlsitemap_domain')->notice('Setting context domain: @domain', [
-        '@domain' => $current_domain_id,
-      ]);
-    } else {
-      \Drupal::logger('xmlsitemap_domain')->warning('Domain @domain not in enabled list', [
-        '@domain' => $current_domain_id,
-      ]);
     }
   }
 
@@ -267,28 +241,22 @@ function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
   $sitemap = $query->getMetaData('sitemap');
 
   if (empty($sitemap->context['domain'])) {
-    \Drupal::logger('xmlsitemap_domain')->notice('No domain in sitemap context - skipping filter');
     return;
   }
 
   $domain_id = $sitemap->context['domain'];
-
-  \Drupal::logger('xmlsitemap_domain')->notice('Filtering query for domain: @domain', [
-    '@domain' => $domain_id,
-  ]);
 
   // Get the main table alias (usually 'x' or 'xmlsitemap').
   $tables = $query->getTables();
   $base_table = reset($tables);
   $base_alias = $base_table['alias'];
 
-  // IMPORTANT: Remove the access filter since Domain Access blocks it
-  // We're already filtering by domain, so we can trust the content is meant to be accessible
+  // IMPORTANT: Remove the access filter since Domain Access blocks it.
+  // We're already filtering by domain, so we can trust the content is meant to be accessible.
   $conditions = &$query->conditions();
   foreach ($conditions as $key => $condition) {
     if (is_array($condition) && isset($condition['field']) && $condition['field'] == "$base_alias.access") {
       unset($conditions[$key]);
-      \Drupal::logger('xmlsitemap_domain')->notice('Removed access filter - domain filtering provides access control');
       break;
     }
   }
@@ -317,8 +285,6 @@ function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
   $final_or->condition("$base_alias.type", 'node', '<>');
 
   $query->condition($final_or);
-
-  \Drupal::logger('xmlsitemap_domain')->notice('Query altered - access check bypassed for domain sitemap');
 }
 
 /**

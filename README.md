@@ -4,11 +4,12 @@ A Drupal 11 module that integrates XML Sitemap with Domain Access to create sepa
 
 ## Features
 
-- Enable per-domain sitemaps via simple checkbox configuration
-- Automatic content filtering based on domain access
-- Automatic sitemap regeneration when content is added, updated, or deleted
-- Domain-specific sitemap URLs
-- Support for domain-specific base URLs in sitemaps
+- Enable per-domain sitemaps via checkbox configuration
+- Automatic content filtering based on domain assignment
+- Automatic sitemap regeneration when content changes
+- Domain-specific URLs in sitemaps
+- Bypasses access checks for domain-filtered content
+- Support for "All affiliates" content (appears in all domain sitemaps)
 
 ## Requirements
 
@@ -25,12 +26,12 @@ A Drupal 11 module that integrates XML Sitemap with Domain Access to create sepa
    composer require drupal/xmlsitemap drupal/domain
    ```
 
-3. Enable the module using Drush:
+3. Enable the module:
    ```bash
    drush en xmlsitemap_domain -y
    ```
 
-   Or enable via the admin interface:
+   Or via admin interface:
    - Go to Admin > Extend
    - Find "XML Sitemap Domain" and check the box
    - Click "Install"
@@ -39,155 +40,127 @@ A Drupal 11 module that integrates XML Sitemap with Domain Access to create sepa
 
 ### Enabling Per-Domain Sitemaps
 
-1. Navigate to **Configuration > Search and metadata > XML Sitemap > Settings** (`/admin/config/search/xmlsitemap/settings`)
+1. Navigate to **Configuration > Search and metadata > XML Sitemap > Settings**
+   (`/admin/config/search/xmlsitemap/settings`)
 
-2. You will see a new section called **"Domain-Specific Sitemaps"**
+2. Scroll to the **"Domain-Specific Sitemaps"** section
 
-3. Check the boxes for the domains you want to enable sitemaps for
+3. Check the boxes for domains you want to enable sitemaps for
 
 4. Click **"Save configuration"**
 
-5. The module will automatically:
-   - Generate separate sitemaps for each enabled domain
-   - Filter content based on domain assignments
-   - Provide sitemap URLs for each domain
+5. Rebuild sitemaps:
+   ```bash
+   drush xmlsitemap:rebuild
+   ```
+   Or via UI at `/admin/config/search/xmlsitemap/rebuild`
 
-### Sitemap URLs
+### Accessing Domain Sitemaps
 
-Once configured, each domain will have its own sitemap available at:
-- `/sitemap-[domain_id].xml`
+Once configured, each domain will have its own sitemap at:
+- `https://domain1.com/sitemap.xml`
+- `https://domain2.com/sitemap.xml`
+- etc.
 
-For example, if you have domains with IDs:
-- `example_com` → `/sitemap-example_com.xml`
-- `blog_example_com` → `/sitemap-blog_example_com.xml`
-- `shop_example_com` → `/sitemap-shop_example_com.xml`
+Each sitemap contains only content assigned to that specific domain.
 
-The settings page will show you the exact URLs for each enabled domain.
+### Content Filtering Logic
+
+Content appears in a domain's sitemap if:
+
+1. **Node is assigned to the domain** - The `field_domain_access` field includes the domain ID
+2. **"All affiliates" is enabled** - The `field_domain_all_affiliates` field is set to TRUE
+3. **No domain field exists** - Nodes without domain restrictions appear in all sitemaps
+
+Content is **excluded** if:
+- Node is assigned to OTHER domains only (not this domain)
 
 ### Automatic Sitemap Regeneration
 
-The module automatically regenerates the appropriate domain sitemaps when:
-- New content is created and assigned to specific domains
-- Content is updated or domain assignments change
+The module automatically triggers sitemap regeneration when:
+- New content is created
+- Content is updated
 - Content is deleted
+- Domain assignments change
 
-This ensures your sitemaps stay up-to-date without manual intervention.
+This ensures sitemaps stay current without manual intervention.
 
-### How Content is Filtered
+## How It Works
 
-When you access a domain's sitemap (e.g., `https://breakingua.news/sitemap.xml`), the module:
+### Technical Architecture
 
-1. **Detects the active domain** - Uses Domain Access module to identify which domain you're on
-2. **Filters content** - Only includes content where:
-   - The **field_domain_access** field includes this domain, OR
-   - The **field_domain_all_affiliates** field is set to TRUE (content available to all domains)
-3. **Rewrites URLs** - Changes all URLs in the sitemap to use the current domain's base URL
+The module uses XML Sitemap's context system to generate separate sitemaps:
 
-Example:
-- Content assigned to `breakingua.news` → appears in `https://breakingua.news/sitemap.xml`
-- Content assigned to `polissya.today` → appears in `https://polissya.today/sitemap.xml`
-- Content assigned to both → appears in both sitemaps
-- Content with "All affiliates" → appears in all enabled domain sitemaps
+1. **Context Registration** (`hook_xmlsitemap_context_info()`)
+   - Registers "domain" as a context type
+
+2. **Context Detection** (`hook_xmlsitemap_context()`)
+   - Detects the active domain when sitemap is accessed
+   - Returns context `['domain' => 'domain_id']`
+
+3. **Query Filtering** (`hook_query_xmlsitemap_generate_alter()`)
+   - Modifies the database query to filter by domain
+   - Joins with `node__field_domain_access` table
+   - **Removes access check** (Domain Access blocks it incorrectly)
+   - Filters nodes by domain assignment
+
+4. **URL Rewriting** (`hook_xmlsitemap_element_alter()`)
+   - Rewrites URLs to use the active domain's base URL
+   - Ensures all sitemap URLs match the domain being accessed
+
+### Why Access Check is Bypassed
+
+Domain Access module sets `access = 0` for nodes when checked from the "wrong" domain context. Since we're already filtering by domain assignment, the access check is redundant and causes all nodes to be excluded. The module removes this filter for domain-specific sitemaps.
+
+**Security**: Only published nodes (`status = 1`) are included. Domain assignment provides access control.
 
 ## Configuration
 
 ### Auto-Regeneration
 
-The module includes automatic regeneration settings:
-- **Auto-regenerate**: Enabled by default
-- Automatically queues sitemaps for regeneration when relevant content changes
-
-You can configure this at: Configuration > XML Sitemap Domain Settings
-
-### Domain Setup
-
-Before using this module, ensure you have:
-1. Domain Access module installed and configured
-2. At least one domain created in **Configuration > Domain Access**
-3. Content types configured with `field_domain_access` field
-
-## Troubleshooting
-
-### "Domain-Specific Sitemaps" section not appearing
-
-1. **Clear cache**: Run `drush cr` or clear cache via admin interface
-2. **Check dependencies**: Ensure Domain Access module is enabled
-3. **Check form ID**: Look in your Drupal logs for "Form ID:" messages from xmlsitemap_domain
-4. **Check permissions**: Ensure you have permission to configure XML Sitemap
-
-### Content not appearing in domain sitemap
-
-1. Verify the content has the correct domain assigned in the **Domain Access** field
-2. Check that the content type is enabled in XML Sitemap settings
-3. Clear cache and regenerate the sitemap
-4. Check that the domain is enabled in the Domain-Specific Sitemaps section
-
-### All domains show same content / wrong URL count
-
-If all domain sitemaps show the same number of URLs:
-1. **Clear all caches**: `drush cr`
-2. **Regenerate sitemaps**: Visit Configuration > XML Sitemap and click "Rebuild sitemap"
-3. **Check content domain assignments**: Ensure content has proper domain access fields set
-4. **Verify domains are enabled**: Check the Domain-Specific Sitemaps section
-
-### URLs show wrong domain
-
-If `https://breakingua.news/sitemap.xml` shows URLs like `https://new.polissya.today/...`:
-1. **Clear cache**: The URL rewriting is cached
-2. **Access via correct domain**: Make sure you're accessing the sitemap through the actual domain URL
-3. **Check domain configuration**: Verify the domain is configured correctly in Domain Access module
-
-### Sitemap returns 404
-
-1. Ensure the domain is enabled in the settings
-2. Clear all caches
-3. Run cron to regenerate sitemaps
-4. Check the exact sitemap URL in the settings page
-
-## Technical Details
-
-### Files
-
-- `xmlsitemap_domain.info.yml` - Module definition
-- `xmlsitemap_domain.module` - Main module hooks and functions
-- `xmlsitemap_domain.install` - Installation and uninstallation hooks
-- `config/schema/xmlsitemap_domain.schema.yml` - Configuration schema
-
-### Data Storage
-
-The module uses Drupal State API to store configuration:
-- **State key**: `xmlsitemap_domain_enabled` - Array of enabled domain IDs
-- **State key**: `xmlsitemap_domain_current` - Current domain context during generation
-
-### Hooks Implemented
-
-- `hook_form_alter()` - Adds domain checkboxes to XML Sitemap settings form
-- `hook_entity_insert()` - Triggers regeneration on new content
-- `hook_entity_update()` - Triggers regeneration on content updates
-- `hook_entity_delete()` - Triggers regeneration on content deletion
-- `hook_xmlsitemap_links_alter()` - Filters content by active domain in sitemaps
-- `hook_xmlsitemap_element_alter()` - Rewrites URLs to use active domain's base URL
-- `hook_page_attachments()` - Adds sitemap link to HTML head
+Auto-regeneration is enabled by default in `xmlsitemap_domain.install`. Sitemaps regenerate automatically when content with domain assignments changes.
 
 ### Domain Field Requirements
 
-For the module to work properly, your content types should have:
-- **field_domain_access** - Entity reference field to domain entities
-- **field_domain_all_affiliates** (optional) - Boolean field for "all domains" content
+Your content types should have these fields (created by Domain Access module):
+- **field_domain_access** - Entity reference to domain entities (required)
+- **field_domain_all_affiliates** - Boolean for "all domains" content (optional)
 
-These fields are typically created by the Domain Access module.
+## Files
 
-### Debugging
+- `xmlsitemap_domain.info.yml` - Module definition and dependencies
+- `xmlsitemap_domain.module` - Main implementation (hooks)
+- `xmlsitemap_domain.install` - Installation and uninstallation
+- `config/schema/xmlsitemap_domain.schema.yml` - Configuration schema
+- `README.md` - This file
 
-The module logs form IDs to help with troubleshooting. Check your Drupal logs at:
-- **Admin > Reports > Recent log messages**
-- Look for messages from `xmlsitemap_domain`
+## Troubleshooting
 
-## Known Limitations
+### No "Domain-Specific Sitemaps" section in settings
 
-- Sitemap URLs use domain IDs, not domain hostnames
-- Per-domain sitemap index files not yet supported
-- Requires manual cache clear after configuration changes
+1. **Clear cache**: `drush cr`
+2. **Verify Domain module is enabled**: `drush pm:list --status=enabled | grep domain`
+3. **Check for domains**: Go to Configuration > Domain Access
+
+### Sitemap shows only 1 link (frontpage)
+
+This was caused by access checks. The current version bypasses this. If you still see the issue:
+
+1. **Update to latest version** of this module
+2. **Clear cache**: `drush cr`
+3. **Delete old sitemaps**: `rm -f web/sites/default/files/sitemap*.xml*`
+4. **Rebuild**: `drush xmlsitemap:rebuild`
+
+### Different domains show same content
+
+1. **Verify domain assignments**: Check that content has `field_domain_access` set
+2. **Rebuild sitemaps**: `drush xmlsitemap:rebuild`
+3. **Check enabled domains**: Verify domains are checked in module settings
+
+### Sitemap URLs show wrong domain
+
+1. **Access via correct domain**: Sitemaps are generated dynamically based on the domain you access them from
+2. **Clear cache**: The domain context is cached: `drush cr`
 
 ## Support
 
