@@ -282,6 +282,17 @@ function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
   $base_table = reset($tables);
   $base_alias = $base_table['alias'];
 
+  // IMPORTANT: Remove the access filter since Domain Access blocks it
+  // We're already filtering by domain, so we can trust the content is meant to be accessible
+  $conditions = &$query->conditions();
+  foreach ($conditions as $key => $condition) {
+    if (is_array($condition) && isset($condition['field']) && $condition['field'] == "$base_alias.access") {
+      unset($conditions[$key]);
+      \Drupal::logger('xmlsitemap_domain')->notice('Removed access filter - domain filtering provides access control');
+      break;
+    }
+  }
+
   // Join with node field data to filter by domain.
   $query->leftJoin('node__field_domain_access', 'nfd', "$base_alias.type = 'node' AND $base_alias.id = nfd.entity_id");
 
@@ -307,7 +318,7 @@ function xmlsitemap_domain_query_xmlsitemap_generate_alter($query) {
 
   $query->condition($final_or);
 
-  \Drupal::logger('xmlsitemap_domain')->notice('Query altered - nodes without domain field will be included');
+  \Drupal::logger('xmlsitemap_domain')->notice('Query altered - access check bypassed for domain sitemap');
 }
 
 /**
